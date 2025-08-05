@@ -1,0 +1,92 @@
+// src/controllers/authController.js
+import User from '../models/userModel.js';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { validationResult } from 'express-validator';
+
+const MONGO_URI="mongodb+srv://book-review-platform-user:book-review-platform-user@cluster0.ouno6oc.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
+const JWT_SECRET="eaff6acad29106d2e782583b9d70996d73c8520851903261ea4904516322a6db1264ef1529e97079fea007345e2211a5b3b0ce8d20c8231b0410c519a8c59b00"
+
+// User Signup
+export const signup = async (req, res) => {
+    // 1. Validate the incoming data
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { username, password } = req.body;
+
+    try {
+        // 2. Check if user already exists
+        let user = await User.findOne({ username });
+        if (user) {
+            return res.status(400).json({ msg: 'User already exists' });
+        }
+
+        // 3. Create new user instance
+        user = new User({ username, password });
+
+        // 4. Hash the password
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
+
+        // 5. Save user to the database
+        await user.save();
+
+        // 6. Create and return a JWT
+        const payload = { user: { id: user.id } };
+        jwt.sign(payload, JWT_SECRET, { expiresIn: '5h' }, (err, token) => {
+            if (err) throw err;
+            res.status(201).json({ token });
+        });
+
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send('Server error');
+    }
+};
+
+// User Login
+export const login = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { username, password } = req.body;
+
+    try {
+        // 2. Check if the user exists
+        const user = await User.findOne({ username });
+        if (!user) {
+            // Use a generic message for security - don't reveal if username vs. password was wrong
+            return res.status(400).json({ msg: 'Invalid credentials' });
+        }
+
+        // 3. Compare the provided password with the hashed password in the database
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ msg: 'Invalid credentials' });
+        }
+
+        // 4. If credentials are correct, create and return a JWT
+        const payload = { user: { id: user.id } };
+
+        jwt.sign(
+            payload,
+            JWT_SECRET,
+            { expiresIn: '5h' }, // Token expires in 5 hours
+            (err, token) => {
+                if (err) throw err;
+                res.status(200).json({ token }); // Send 200 OK status with the token
+            }
+        );
+
+    } catch (err) {
+        // This catch block is crucial. If anything above fails, it sends a response.
+        console.error(err.message);
+        res.status(500).send('Server error');
+    }
+};
